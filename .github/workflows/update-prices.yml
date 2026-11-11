@@ -1,0 +1,95 @@
+# Runs on GitHub's computers. Updates the price files and publishes the site.
+# Times are in UTC. Chicago is UTC-6 in winter and UTC-5 in summer.
+name: Update prices
+
+on:
+  schedule:
+    - cron: "5,35 13-21 * * 1-5"   # stock prices, about every 30 minutes during the trading day
+    - cron: "10 18 * * 1-5"        # option chains, once a day (12:10 PM Chicago in winter, 1:10 PM in summer)
+    - cron: "20 10 * * 1-5"        # earnings dates, ex-dividend dates, beta (early morning)
+  workflow_dispatch:               # adds a "Run workflow" button on the Actions tab
+    inputs:
+      mode:
+        description: "What to update"
+        type: choice
+        options: [stocks, chains, info, all, page-only]
+        default: stocks
+  push:
+    branches: [main]
+    paths: ["index.html"]          # publish right away when the page itself is changed
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - name: Get the project files
+        uses: actions/checkout@v4
+
+      - name: Get the currently published site (skipped the very first time)
+        uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          ref: gh-pages
+          path: site
+
+      - name: Work out what to update
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then MODE="${{ inputs.mode }}"
+          elif [ "${{ github.event_name }}" = "push" ]; then MODE="page-only"
+          elif [ "${{ github.event.schedule }}" = "10 18 * * 1-5" ]; then MODE="chains"
+          elif [ "${{ github.event.schedule }}" = "20 10 * * 1-5" ]; then MODE="info"
+          else MODE="stocks"; fi
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          echo "Updating: $MODE"
+
+      - name: Set up Python
+        if: steps.mode.outputs.mode != 'page-only'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install yfinance
+        if: steps.mode.outputs.mode != 'page-only'
+        run: pip install -r requirements.txt
+
+      - name: Update prices
+        if: steps.mode.outputs.mode != 'page-only'
+        run: python scripts/update_prices.py --mode ${{ steps.mode.outputs.mode }} --out site/data
+
+      - name: Publish the site
+        run: |
+          rm -rf site/.git
+          mkdir -p site/data
+          cp index.html site/index.html
+          touch site/.nojekyll
+          cd site
+          git init -q -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Update (${{ steps.mode.outputs.mode }}) $(date -u +%Y-%m-%dT%H:%MZ)"
+          # Replaces the published copy each time, so old price files never pile up.
+          git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" gh-pages
+
+      - name: Keep the schedule switched on
+        # GitHub pauses schedules in projects with no activity for 60 days. A tiny monthly note prevents that.
+        if: steps.mode.outputs.mode == 'info'
+        run: |
+          LAST=$(cat keepalive.txt 2>/dev/null || echo 2000-01-01)
+          if [ $(( ($(date -u +%s) - $(date -u -d "$LAST" +%s)) / 86400 )) -ge 30 ]; then
+            date -u +%Y-%m-%d > keepalive.txt
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add keepalive.txt
+            git commit -q -m "Monthly keep-alive"
+            git push -q
+          fi
