@@ -151,6 +151,7 @@ out = tempfile.mkdtemp()
 try:
     # ------------------------------------------------------------ stocks: quote service down -> backup download
     rc = up.main(["--mode", "stocks", "--out", out, "--limit", "40"])
+    check("good run reports success (green check)", rc == 0)
     st = json.load(open(os.path.join(out, "stocks.json")))
     check("stocks saved via backup download", len(st["stocks"]) == 40 and CALLS["download"] >= 1)
     check("prices are numbers", all(isinstance(v, float) for v in st["stocks"].values()))
@@ -209,7 +210,8 @@ try:
     for t in list(full)[:40]:
         BROKEN.add(t)
     good_before = json.load(open(os.path.join(out, "stocks.json")))["updated"]
-    up.main(["--mode", "stocks", "--out", out, "--limit", "40"])
+    rc_bad = up.main(["--mode", "stocks", "--out", out, "--limit", "40"])
+    check("run that updates nothing reports failure (red X)", rc_bad == 1)
     check("bad stock run keeps the last good file", json.load(open(os.path.join(out, "stocks.json")))["updated"] == good_before)
     THROTTLE["on"] = False
     BROKEN.clear()

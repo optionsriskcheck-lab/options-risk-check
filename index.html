@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Options Risk Check</title>
 <style>
+[hidden] { display: none !important; }
 :root {
   --bg: #f4f5f7; --card: #ffffff; --text: #1d2330; --muted: #5d6677; --line: #dde1e8; --soft: #eef1f5;
   --accent: #1f5fbf; --accent-text: #ffffff;
@@ -247,6 +248,18 @@ i.line.s2 { border-color: var(--series-2); }
   .rtable td:first-child { white-space: normal; }
 }
 
+/* privacy notice */
+.privacy { background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--good); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 16px; }
+.privacy h2 { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 16px; }
+.privacy .lock { color: var(--good); flex: none; vertical-align: -2px; }
+.privacy ul { margin: 0 0 12px; padding-left: 20px; font-size: 14px; }
+.privacy li { margin-bottom: 4px; }
+.pv-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.pv-mini { display: flex; align-items: center; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; font-size: 14px; }
+.pv-mini .pv-links { display: flex; gap: 8px; }
+.pv-mini.warn #pvLastWrap { color: var(--watch); font-weight: 600; }
+.privacy.mini { padding: 9px 14px; }
+
 </style>
 </head>
 <body>
@@ -278,6 +291,28 @@ i.line.s2 { border-color: var(--series-2); }
 <main class="wrap">
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <div id="exampleBanner" class="banner" hidden>These are example trades with made-up prices. Use <b>More &#x25be; &rarr; Clear everything</b> before adding your own.</div>
+
+  <section class="privacy" id="privacy" aria-labelledby="pvTitle">
+    <div id="pvFull">
+      <h2 id="pvTitle"><svg class="lock" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M4 7V5a4 4 0 0 1 8 0v2h.5A1.5 1.5 0 0 1 14 8.5v5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 13.5v-5A1.5 1.5 0 0 1 3.5 7H4zm1.5 0h5V5a2.5 2.5 0 0 0-5 0v2z" fill="currentColor"/></svg> Your trades are private to this browser</h2>
+      <ul>
+        <li>Everything you enter here is saved <b>only in this web browser, on this device</b>. It is never sent anywhere: not to whoever made or shared this page, and not to anyone else.</li>
+        <li>Anyone else who opens this link gets their own empty page. They can't see your trades, and you can't see theirs.</li>
+        <li>Your trades <b>won't show up on your phone, another computer, or a different browser</b> on this computer.</li>
+        <li><b>Private or incognito windows erase everything when you close them.</b> Use a normal browser window.</li>
+        <li>Clearing your browser's history or site data also erases them. Press <b>Save to file</b> now and then to keep a backup. <b>Load from file</b> brings your trades back, or moves them to another device.</li>
+      </ul>
+      <div class="pv-actions">
+        <button type="button" class="btn small" data-act="save-file">Save to file</button>
+        <button type="button" class="btn small" data-act="load-file">Load from file</button>
+        <button type="button" class="btn small primary" id="pvOk">Got it</button>
+      </div>
+    </div>
+    <div id="pvMini" class="pv-mini" hidden>
+      <span><svg class="lock" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M4 7V5a4 4 0 0 1 8 0v2h.5A1.5 1.5 0 0 1 14 8.5v5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 13.5v-5A1.5 1.5 0 0 1 3.5 7H4zm1.5 0h5V5a2.5 2.5 0 0 0-5 0v2z" fill="currentColor"/></svg> <b>Private to this browser only.</b> <span id="pvLastWrap">Last backup: <span id="pvLast">never</span>.</span></span>
+      <span class="pv-links"><button type="button" class="linkbtn" data-act="save-file">Save to file</button><button type="button" class="linkbtn" id="pvMore">What does this mean?</button></span>
+    </div>
+  </section>
 
   <details class="guide" id="guide">
     <summary>How to use this page</summary>
@@ -1087,7 +1122,8 @@ i.line.s2 { border-color: var(--series-2); }
 
   // ---------- saved data (this browser only) ----------
   function freshState() {
-    return { account: { value: '', cash: '', type: 'cash' }, cfg: Object.assign({}, C.DEFAULTS), positions: [], examples: false };
+    return { account: { value: '', cash: '', type: 'cash' }, cfg: Object.assign({}, C.DEFAULTS), positions: [], examples: false,
+             privacyAck: !!(typeof state !== 'undefined' && state && state.privacyAck), lastBackup: (typeof state !== 'undefined' && state && state.lastBackup) || null };
   }
   function loadState() {
     try {
@@ -1427,6 +1463,7 @@ i.line.s2 { border-color: var(--series-2); }
     analyses = state.positions.map(function (p) { return C.analyzePosition(p, state.cfg, prices, now); });
     summary = C.summarize(analyses, state.account, state.cfg);
     $('exampleBanner').hidden = !state.examples || !state.positions.length;
+    renderPrivacy();
     renderAttention();
     renderExposure();
     renderPositions();
@@ -1716,7 +1753,19 @@ i.line.s2 { border-color: var(--series-2); }
   function saveFile() {
     var data = { app: 'options-risk-check', version: 1, saved: new Date().toISOString(), account: state.account, cfg: state.cfg, positions: state.positions };
     download('options-risk-check-backup-' + C.isoToday(new Date()) + '.json', JSON.stringify(data, null, 2), 'application/json');
+    state.lastBackup = new Date().toISOString(); saveState(); renderPrivacy();
     toast('Backup file saved to your downloads.');
+  }
+  // ---------- privacy notice ----------
+  var showPrivacyFull = false;
+  function renderPrivacy() {
+    var full = !state.privacyAck || showPrivacyFull;
+    $('pvFull').hidden = !full; $('pvMini').hidden = full;
+    $('privacy').classList.toggle('mini', !full);
+    var last = state.lastBackup ? Date.parse(state.lastBackup) : NaN;
+    $('pvLast').textContent = isFinite(last) ? new Date(last).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'never';
+    var stale = state.positions.length && (!isFinite(last) || Date.now() - last > 14 * 86400000);
+    $('pvMini').classList.toggle('warn', !!stale);
   }
   function loadFile(file) {
     var reader = new FileReader();
@@ -1724,7 +1773,8 @@ i.line.s2 { border-color: var(--series-2); }
       try {
         var d = JSON.parse(reader.result);
         if (!d || d.app !== 'options-risk-check' || !Array.isArray(d.positions)) throw new Error('bad');
-        state = { account: Object.assign({ value: '', cash: '', type: 'cash' }, d.account || {}), cfg: Object.assign({}, C.DEFAULTS, d.cfg || {}), positions: d.positions, examples: false };
+        state = { account: Object.assign({ value: '', cash: '', type: 'cash' }, d.account || {}), cfg: Object.assign({}, C.DEFAULTS, d.cfg || {}), positions: d.positions, examples: false,
+                  privacyAck: state.privacyAck, lastBackup: state.lastBackup };
         saveState(); initAccountValues(); buildSettings(); render();
         toast('Loaded ' + d.positions.length + ' trade(s) from the file.');
       } catch (e) { toast('That file is not an Options Risk Check backup.'); }
@@ -1847,6 +1897,8 @@ i.line.s2 { border-color: var(--series-2); }
     $('dlgCancel').addEventListener('click', closeForm);
     $('dlgClose').addEventListener('click', closeForm);
     $('fileInput').addEventListener('change', function () { if (this.files && this.files[0]) loadFile(this.files[0]); this.value = ''; });
+    $('pvOk').addEventListener('click', function () { state.privacyAck = true; showPrivacyFull = false; saveState(); renderPrivacy(); });
+    $('pvMore').addEventListener('click', function () { showPrivacyFull = true; renderPrivacy(); });
     document.addEventListener('click', function (ev) {
       var m = $('moreMenu'); if (m.open && !m.contains(ev.target)) m.removeAttribute('open');
     });

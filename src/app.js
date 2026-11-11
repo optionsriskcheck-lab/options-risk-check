@@ -23,7 +23,8 @@
 
   // ---------- saved data (this browser only) ----------
   function freshState() {
-    return { account: { value: '', cash: '', type: 'cash' }, cfg: Object.assign({}, C.DEFAULTS), positions: [], examples: false };
+    return { account: { value: '', cash: '', type: 'cash' }, cfg: Object.assign({}, C.DEFAULTS), positions: [], examples: false,
+             privacyAck: !!(typeof state !== 'undefined' && state && state.privacyAck), lastBackup: (typeof state !== 'undefined' && state && state.lastBackup) || null };
   }
   function loadState() {
     try {
@@ -363,6 +364,7 @@
     analyses = state.positions.map(function (p) { return C.analyzePosition(p, state.cfg, prices, now); });
     summary = C.summarize(analyses, state.account, state.cfg);
     $('exampleBanner').hidden = !state.examples || !state.positions.length;
+    renderPrivacy();
     renderAttention();
     renderExposure();
     renderPositions();
@@ -652,7 +654,19 @@
   function saveFile() {
     var data = { app: 'options-risk-check', version: 1, saved: new Date().toISOString(), account: state.account, cfg: state.cfg, positions: state.positions };
     download('options-risk-check-backup-' + C.isoToday(new Date()) + '.json', JSON.stringify(data, null, 2), 'application/json');
+    state.lastBackup = new Date().toISOString(); saveState(); renderPrivacy();
     toast('Backup file saved to your downloads.');
+  }
+  // ---------- privacy notice ----------
+  var showPrivacyFull = false;
+  function renderPrivacy() {
+    var full = !state.privacyAck || showPrivacyFull;
+    $('pvFull').hidden = !full; $('pvMini').hidden = full;
+    $('privacy').classList.toggle('mini', !full);
+    var last = state.lastBackup ? Date.parse(state.lastBackup) : NaN;
+    $('pvLast').textContent = isFinite(last) ? new Date(last).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'never';
+    var stale = state.positions.length && (!isFinite(last) || Date.now() - last > 14 * 86400000);
+    $('pvMini').classList.toggle('warn', !!stale);
   }
   function loadFile(file) {
     var reader = new FileReader();
@@ -660,7 +674,8 @@
       try {
         var d = JSON.parse(reader.result);
         if (!d || d.app !== 'options-risk-check' || !Array.isArray(d.positions)) throw new Error('bad');
-        state = { account: Object.assign({ value: '', cash: '', type: 'cash' }, d.account || {}), cfg: Object.assign({}, C.DEFAULTS, d.cfg || {}), positions: d.positions, examples: false };
+        state = { account: Object.assign({ value: '', cash: '', type: 'cash' }, d.account || {}), cfg: Object.assign({}, C.DEFAULTS, d.cfg || {}), positions: d.positions, examples: false,
+                  privacyAck: state.privacyAck, lastBackup: state.lastBackup };
         saveState(); initAccountValues(); buildSettings(); render();
         toast('Loaded ' + d.positions.length + ' trade(s) from the file.');
       } catch (e) { toast('That file is not an Options Risk Check backup.'); }
@@ -783,6 +798,8 @@
     $('dlgCancel').addEventListener('click', closeForm);
     $('dlgClose').addEventListener('click', closeForm);
     $('fileInput').addEventListener('change', function () { if (this.files && this.files[0]) loadFile(this.files[0]); this.value = ''; });
+    $('pvOk').addEventListener('click', function () { state.privacyAck = true; showPrivacyFull = false; saveState(); renderPrivacy(); });
+    $('pvMore').addEventListener('click', function () { showPrivacyFull = true; renderPrivacy(); });
     document.addEventListener('click', function (ev) {
       var m = $('moreMenu'); if (m.open && !m.contains(ev.target)) m.removeAttribute('open');
     });

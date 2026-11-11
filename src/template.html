@@ -38,6 +38,28 @@
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <div id="exampleBanner" class="banner" hidden>These are example trades with made-up prices. Use <b>More &#x25be; &rarr; Clear everything</b> before adding your own.</div>
 
+  <section class="privacy" id="privacy" aria-labelledby="pvTitle">
+    <div id="pvFull">
+      <h2 id="pvTitle"><svg class="lock" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M4 7V5a4 4 0 0 1 8 0v2h.5A1.5 1.5 0 0 1 14 8.5v5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 13.5v-5A1.5 1.5 0 0 1 3.5 7H4zm1.5 0h5V5a2.5 2.5 0 0 0-5 0v2z" fill="currentColor"/></svg> Your trades are private to this browser</h2>
+      <ul>
+        <li>Everything you enter here is saved <b>only in this web browser, on this device</b>. It is never sent anywhere: not to whoever made or shared this page, and not to anyone else.</li>
+        <li>Anyone else who opens this link gets their own empty page. They can't see your trades, and you can't see theirs.</li>
+        <li>Your trades <b>won't show up on your phone, another computer, or a different browser</b> on this computer.</li>
+        <li><b>Private or incognito windows erase everything when you close them.</b> Use a normal browser window.</li>
+        <li>Clearing your browser's history or site data also erases them. Press <b>Save to file</b> now and then to keep a backup. <b>Load from file</b> brings your trades back, or moves them to another device.</li>
+      </ul>
+      <div class="pv-actions">
+        <button type="button" class="btn small" data-act="save-file">Save to file</button>
+        <button type="button" class="btn small" data-act="load-file">Load from file</button>
+        <button type="button" class="btn small primary" id="pvOk">Got it</button>
+      </div>
+    </div>
+    <div id="pvMini" class="pv-mini" hidden>
+      <span><svg class="lock" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M4 7V5a4 4 0 0 1 8 0v2h.5A1.5 1.5 0 0 1 14 8.5v5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 13.5v-5A1.5 1.5 0 0 1 3.5 7H4zm1.5 0h5V5a2.5 2.5 0 0 0-5 0v2z" fill="currentColor"/></svg> <b>Private to this browser only.</b> <span id="pvLastWrap">Last backup: <span id="pvLast">never</span>.</span></span>
+      <span class="pv-links"><button type="button" class="linkbtn" data-act="save-file">Save to file</button><button type="button" class="linkbtn" id="pvMore">What does this mean?</button></span>
+    </div>
+  </section>
+
   <details class="guide" id="guide">
     <summary>How to use this page</summary>
     <ol>

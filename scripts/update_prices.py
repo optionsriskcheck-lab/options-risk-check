@@ -495,6 +495,9 @@ def main(argv=None):
     meta["tickers"] = len(uni)
     write_json(meta_path, meta)
     log("Done:", results)
+    if results and not any(results.values()):
+        log("Nothing was updated. Yahoo may be blocking or slowing requests. The last good prices are still published.")
+        return 1  # shows a red X on GitHub's Actions tab
     return 0
 
 

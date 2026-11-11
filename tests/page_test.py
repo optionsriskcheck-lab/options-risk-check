@@ -33,6 +33,15 @@ try:
         page.goto(f"http://localhost:{port}/index.html")
         page.wait_for_timeout(500)
         check("empty page shows guide", page.locator("#guide[open]").count() == 1)
+        check("privacy notice shown in full on first visit", page.locator("#pvFull").is_visible() and "private to this browser" in page.inner_text("#pvFull").lower())
+        check("privacy notice warns about private windows", "incognito" in page.inner_text("#pvFull"))
+        check("one-line version hidden while the full notice shows", not page.locator("#pvMini").is_visible())
+        page.click("#pvOk"); page.wait_for_timeout(100)
+        check("Got it collapses to one line", page.locator("#pvMini").is_visible() and not page.locator("#pvFull").is_visible())
+        check("one-line reminder shows last backup: never", "never" in page.inner_text("#pvMini"))
+        page.click("#pvMore"); page.wait_for_timeout(100)
+        check("What does this mean? reopens it", page.locator("#pvFull").is_visible())
+        page.click("#pvOk"); page.wait_for_timeout(100)
         page.screenshot(path=str(shots / "01-empty.png"), full_page=True)
 
         # Example trades
@@ -126,10 +135,12 @@ try:
         d2.value.save_as(str(bk))
         data = json.loads(bk.read_text())
         check("backup has positions", len(data["positions"]) >= 7)
+        check("last backup date shown after saving", "never" not in page.inner_text("#pvMini"))
 
         # Reload keeps trades
         page.reload(); page.wait_for_timeout(400)
         check("trades survive reload", page.locator(".ptable > tbody > tr:not(.detail-row)").count() >= 7)
+        check("privacy stays collapsed after reload", page.locator("#pvMini").is_visible())
 
         # Clear needs two clicks, then load from backup
         page.click("#moreMenu summary")

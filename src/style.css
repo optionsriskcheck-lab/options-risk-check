@@ -1,3 +1,4 @@
+[hidden] { display: none !important; }
 :root {
   --bg: #f4f5f7; --card: #ffffff; --text: #1d2330; --muted: #5d6677; --line: #dde1e8; --soft: #eef1f5;
   --accent: #1f5fbf; --accent-text: #ffffff;
@@ -239,3 +240,15 @@ i.line.s2 { border-color: var(--series-2); }
   .rtable th .src { font-size: 10px; }
   .rtable td:first-child { white-space: normal; }
 }
+
+/* privacy notice */
+.privacy { background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--good); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 16px; }
+.privacy h2 { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 16px; }
+.privacy .lock { color: var(--good); flex: none; vertical-align: -2px; }
+.privacy ul { margin: 0 0 12px; padding-left: 20px; font-size: 14px; }
+.privacy li { margin-bottom: 4px; }
+.pv-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.pv-mini { display: flex; align-items: center; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; font-size: 14px; }
+.pv-mini .pv-links { display: flex; gap: 8px; }
+.pv-mini.warn #pvLastWrap { color: var(--watch); font-weight: 600; }
+.privacy.mini { padding: 9px 14px; }
