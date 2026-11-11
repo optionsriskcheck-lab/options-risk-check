@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Options Risk Check</title>
+<style>
+/*__CSS__*/
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap top-row">
+    <div>
+      <h1 id="appName">Options Risk Check</h1>
+      <p class="sub">See which trades need attention and whether your account is stretched too thin. Covers wheel trades, credit spreads, iron condors and PMCCs.</p>
+    </div>
+    <div class="toolbar">
+      <button type="button" class="btn" id="btnRefresh" title="Load the newest automatic prices">&#x21bb; Refresh prices</button>
+      <button type="button" class="btn primary" id="btnAdd">+ Add trade</button>
+      <details class="menu" id="moreMenu">
+        <summary class="btn">More &#x25be;</summary>
+        <div class="menu-list">
+          <button type="button" data-act="save-file">Save to file (backup)</button>
+          <button type="button" data-act="load-file">Load from file</button>
+          <button type="button" data-act="csv">Download spreadsheet (.csv)</button>
+          <button type="button" data-act="examples">Load example trades</button>
+          <button type="button" data-act="clear" class="danger">Clear everything</button>
+        </div>
+      </details>
+      <input type="file" id="fileInput" accept=".json,application/json" hidden>
+    </div>
+  </div>
+  <div class="wrap"><p class="price-status" id="priceStatus">Prices: using the prices you type in.</p></div>
+</header>
+
+<main class="wrap">
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="exampleBanner" class="banner" hidden>These are example trades with made-up prices. Use <b>More &#x25be; &rarr; Clear everything</b> before adding your own.</div>
+
+  <details class="guide" id="guide">
+    <summary>How to use this page</summary>
+    <ol>
+      <li>Enter your <b>account value</b> and <b>cash available</b> below.</li>
+      <li>Add each open trade with <b>+ Add trade</b>. Pick the strategy, then fill in the strikes, expiration, number of contracts and the prices you were filled at.</li>
+      <li>Type the <b>current stock price</b> and <b>current option prices</b> from your broker. Once automatic prices are switched on, most tickers fill in by themselves when you press <b>Refresh prices</b>.</li>
+      <li>Read <b>Needs attention</b> first, then <b>Account exposure</b>.</li>
+      <li>Open <b>Alert settings</b> and change the limits to match your own rules.</li>
+    </ol>
+    <p>Want to see how it works first? Use <b>More &#x25be; &rarr; Load example trades</b>.</p>
+  </details>
+
+  <section class="card" aria-labelledby="hAccount">
+    <h2 id="hAccount">Your account</h2>
+    <div class="acct-grid">
+      <label>Account value
+        <input id="accValue" inputmode="decimal" placeholder="e.g. 100000" autocomplete="off">
+      </label>
+      <label>Cash available
+        <input id="accCash" inputmode="decimal" placeholder="e.g. 60000" autocomplete="off">
+      </label>
+      <label>Account type
+        <select id="accType">
+          <option value="cash">Cash account</option>
+          <option value="margin">Margin account</option>
+        </select>
+      </label>
+    </div>
+    <details class="settings">
+      <summary>Alert settings</summary>
+      <p class="hint">These are common starting points. Change them to match your own rules; they are saved with your trades.</p>
+      <div class="settings-grid" id="settingsGrid"></div>
+      <button type="button" class="btn small" id="btnResetSettings">Reset to starting points</button>
+    </details>
+  </section>
+
+  <section class="card" aria-labelledby="hAttention">
+    <h2 id="hAttention">Needs attention</h2>
+    <div id="attention"></div>
+  </section>
+
+  <section class="card" aria-labelledby="hExposure">
+    <h2 id="hExposure">Account exposure</h2>
+    <div id="exposure"></div>
+  </section>
+
+  <section class="card" aria-labelledby="hPositions">
+    <div class="h-row">
+      <h2 id="hPositions">Open trades</h2>
+      <button type="button" class="btn small primary" id="btnAdd2">+ Add trade</button>
+    </div>
+    <div id="positions"></div>
+  </section>
+
+  <footer class="foot">
+    <p class="remind"><b>Before you adjust any trade,</b> check its risk graph in your broker's analysis tool (for example, the Analyze tab in thinkorswim).</p>
+    <p><b>Your trades stay on this device.</b> They are saved in this web browser only and are never sent anywhere. Use <i>Save to file</i> to keep a backup or move them to another computer.</p>
+    <p class="disclaimer">For education and personal record-keeping only. This is not financial advice and not a recommendation to open, close or adjust any trade. Numbers are estimates from a standard option-pricing model and can differ from your broker's. Always check your broker's figures before you act.</p>
+  </footer>
+</main>
+
+<dialog id="tradeDialog" aria-labelledby="dlgTitle">
+  <form id="tradeForm" method="dialog" novalidate>
+    <div class="dlg-head">
+      <h3 id="dlgTitle">Add a trade</h3>
+      <button type="button" class="x" id="dlgClose" aria-label="Close">&times;</button>
+    </div>
+    <div class="dlg-body">
+      <div class="row2">
+        <label>Strategy
+          <select id="f-strategy"></select>
+        </label>
+        <label>Ticker
+          <input id="f-ticker" autocomplete="off" placeholder="e.g. AAPL" maxlength="12">
+        </label>
+      </div>
+      <div class="row2">
+        <label id="qtyLabel">Contracts
+          <input id="f-qty" inputmode="numeric" placeholder="e.g. 1">
+        </label>
+        <label>Stock price now <span class="opt">(fills in automatically when available)</span>
+          <input id="f-stock" inputmode="decimal" placeholder="e.g. 48.20">
+        </label>
+      </div>
+      <div id="legFields"></div>
+      <details class="more">
+        <summary>More details (optional)</summary>
+        <div class="row2">
+          <label>Earnings date <input type="date" id="f-earn"></label>
+          <label>Ex-dividend date <input type="date" id="f-exdiv"></label>
+        </div>
+        <div class="row2">
+          <label>Beta <span class="opt">(1.0 is used if blank)</span> <input id="f-beta" inputmode="decimal" placeholder="e.g. 1.2"></label>
+          <label>Sector <input id="f-sector" autocomplete="off" placeholder="e.g. Technology" maxlength="40"></label>
+        </div>
+        <div class="row2">
+          <label>Date opened <input type="date" id="f-open"></label>
+          <label>Notes <input id="f-notes" autocomplete="off" maxlength="200"></label>
+        </div>
+      </details>
+      <ul class="errors" id="formErrors" hidden></ul>
+    </div>
+    <div class="dlg-foot">
+      <button type="button" class="btn" id="dlgCancel">Cancel</button>
+      <button type="submit" class="btn primary" id="dlgSave">Save trade</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+//__CORE__
+</script>
+<script>
+//__APP__
+</script>
+</body>
+</html>
