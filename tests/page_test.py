@@ -44,6 +44,24 @@ try:
         page.click("#pvOk"); page.wait_for_timeout(100)
         page.screenshot(path=str(shots / "01-empty.png"), full_page=True)
 
+        # Own trade first, then examples: own trade must survive
+        page.fill("#accValue", "35000")
+        page.click("#btnAdd"); page.select_option("#f-strategy", "csp")
+        page.fill("#f-ticker", "MINE"); page.fill("#f-qty", "1"); page.fill("#f-stock", "50"); page.fill("#f-exp-a", "2026-12-18")
+        page.fill("#f-strike-0", "45"); page.fill("#f-fill-0", "1"); page.click("#dlgSave"); page.wait_for_timeout(200)
+        page.click("#moreMenu summary"); page.click("[data-act=examples]"); page.wait_for_timeout(300)
+        check("examples banner offers Back to my trades", page.locator("#btnBackMine").is_visible() and page.inner_text("#btnBackMine") == "Back to my trades")
+        check("own trade hidden while examples show", page.locator(".ptable", has_text="MINE").count() == 0)
+        page.click("#btnBackMine"); page.wait_for_timeout(300)
+        check("Back to my trades restores own trade", page.locator(".ptable", has_text="MINE").count() == 1 and page.input_value("#accValue") == "35000")
+        check("banner gone after going back", not page.locator("#exampleBanner").is_visible())
+        # Clear everything while examples show also brings own trades back
+        page.click("#moreMenu summary"); page.click("[data-act=examples]"); page.wait_for_timeout(300)
+        page.click("#moreMenu summary"); page.click("[data-act=clear]"); page.click("[data-act=clear]"); page.wait_for_timeout(300)
+        check("Clear everything during examples returns own trades", page.locator(".ptable", has_text="MINE").count() == 1)
+        # Now remove own trade and look at examples for the rest of the test
+        page.locator(".ptable [data-del]").first.click(); page.locator(".ptable [data-del]").first.click(); page.wait_for_timeout(200)
+
         # Example trades
         page.click("#moreMenu summary")
         page.click("[data-act=examples]")

@@ -26,16 +26,29 @@
     return { account: { value: '', cash: '', type: 'cash' }, cfg: Object.assign({}, C.DEFAULTS), positions: [], examples: false,
              privacyAck: !!(typeof state !== 'undefined' && state && state.privacyAck), lastBackup: (typeof state !== 'undefined' && state && state.lastBackup) || null };
   }
+  function normalize(s) {
+    if (!s || !Array.isArray(s.positions)) return null;
+    s.cfg = Object.assign({}, C.DEFAULTS, s.cfg || {});
+    s.account = Object.assign({ value: '', cash: '', type: 'cash' }, s.account || {});
+    return s;
+  }
   function loadState() {
-    try {
-      var raw = localStorage.getItem(KEY);
-      if (!raw) return null;
-      var s = JSON.parse(raw);
-      if (!s || !Array.isArray(s.positions)) return null;
-      s.cfg = Object.assign({}, C.DEFAULTS, s.cfg || {});
-      s.account = Object.assign({ value: '', cash: '', type: 'cash' }, s.account || {});
-      return s;
-    } catch (e) { return null; }
+    try { var raw = localStorage.getItem(KEY); return raw ? normalize(JSON.parse(raw)) : null; }
+    catch (e) { return null; }
+  }
+  // While example trades are showing, the member's own trades wait here.
+  var STASH = KEY + '.mine';
+  function stashed() {
+    try { var raw = localStorage.getItem(STASH); return raw ? normalize(JSON.parse(raw)) : null; } catch (e) { return null; }
+  }
+  function backToMine(quiet) {
+    var mine = stashed();
+    var keep = { privacyAck: state.privacyAck, lastBackup: state.lastBackup };
+    state = mine || freshState();
+    state.examples = false; state.privacyAck = keep.privacyAck; state.lastBackup = keep.lastBackup;
+    try { localStorage.removeItem(STASH); } catch (e) {}
+    saveState(); initAccountValues(); buildSettings(); render();
+    if (!quiet) toast(mine ? 'Examples removed. Your own trades are back.' : 'Examples removed.');
   }
   var storageOk = true;
   function saveState() {
@@ -363,7 +376,10 @@
     var now = new Date();
     analyses = state.positions.map(function (p) { return C.analyzePosition(p, state.cfg, prices, now); });
     summary = C.summarize(analyses, state.account, state.cfg);
-    $('exampleBanner').hidden = !state.examples || !state.positions.length;
+    $('exampleBanner').hidden = !state.examples;
+    var hasMine = !!(state.examples && stashed());
+    $('exStashNote').hidden = !hasMine;
+    $('btnBackMine').textContent = hasMine ? 'Back to my trades' : 'Remove the examples';
     renderPrivacy();
     renderAttention();
     renderExposure();
@@ -720,6 +736,10 @@
   }
   function dateAfter(days) { var d = new Date(); d.setDate(d.getDate() + days); return C.isoToday(d); }
   function loadExamples() {
+    if (!state.examples && (state.positions.length || state.account.value || state.account.cash)) {
+      try { localStorage.setItem(STASH, JSON.stringify(state)); }
+      catch (e) { toast('This browser would not set your trades aside, so the examples were not loaded. Use Save to file first.'); return; }
+    }
     var e30 = fridayAfter(28), e9 = fridayAfter(7), e23 = fridayAfter(21), e5 = fridayAfter(2), e37 = fridayAfter(35), e400 = fridayAfter(400);
     var L = function (side, type, strike, expiry, fill, mark) { return { side: side, type: type, strike: String(strike), expiry: expiry, fill: String(fill), mark: String(mark) }; };
     state = freshState();
@@ -746,6 +766,7 @@
       return false;
     }
     clearArmed = false; btn.textContent = 'Clear everything';
+    if (state.examples && stashed()) { backToMine(); return true; }  // never lose a member's own trades this way
     state = freshState(); saveState(); initAccountValues(); buildSettings(); render();
     toast('Everything cleared.');
     return true;
@@ -770,7 +791,7 @@
       }
       delArmed = null;
       state.positions = state.positions.filter(function (x) { return x.id !== did; });
-      if (!state.positions.length) state.examples = false;
+      if (!state.positions.length && !stashed()) state.examples = false;
       saveState(); render(); toast('Trade deleted.');
     } else if (t.hasAttribute('data-act')) {
       var act = t.getAttribute('data-act');
@@ -798,6 +819,7 @@
     $('dlgCancel').addEventListener('click', closeForm);
     $('dlgClose').addEventListener('click', closeForm);
     $('fileInput').addEventListener('change', function () { if (this.files && this.files[0]) loadFile(this.files[0]); this.value = ''; });
+    $('btnBackMine').addEventListener('click', function () { backToMine(); });
     $('pvOk').addEventListener('click', function () { state.privacyAck = true; showPrivacyFull = false; saveState(); renderPrivacy(); });
     $('pvMore').addEventListener('click', function () { showPrivacyFull = true; renderPrivacy(); });
     document.addEventListener('click', function (ev) {

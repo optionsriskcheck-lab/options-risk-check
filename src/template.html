@@ -36,7 +36,10 @@
 
 <main class="wrap">
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <div id="exampleBanner" class="banner" hidden>These are example trades with made-up prices. Use <b>More &#x25be; &rarr; Clear everything</b> before adding your own.</div>
+  <div id="exampleBanner" class="banner" hidden>
+    <span><b>You're looking at example trades</b> with made-up tickers and prices. <span id="exStashNote">Your own trades are set aside safely.</span> Anything you add while the examples are showing is removed when you leave them.</span>
+    <button type="button" class="btn small primary" id="btnBackMine">Back to my trades</button>
+  </div>
 
   <section class="privacy" id="privacy" aria-labelledby="pvTitle">
     <div id="pvFull">
@@ -69,7 +72,7 @@
       <li>Read <b>Needs attention</b> first, then <b>Account exposure</b>.</li>
       <li>Open <b>Alert settings</b> and change the limits to match your own rules.</li>
     </ol>
-    <p>Want to see how it works first? Use <b>More &#x25be; &rarr; Load example trades</b>.</p>
+    <p>Want to see how it works first? Use <b>More &#x25be; &rarr; Load example trades</b>. Your own trades are set aside while you look, and one button brings them back.</p>
   </details>
 
   <section class="card" aria-labelledby="hAccount">
