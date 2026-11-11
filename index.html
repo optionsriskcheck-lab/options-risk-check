@@ -284,7 +284,7 @@ i.line.s2 { border-color: var(--series-2); }
     <ol>
       <li>Enter your <b>account value</b> and <b>cash available</b> below.</li>
       <li>Add each open trade with <b>+ Add trade</b>. Pick the strategy, then fill in the strikes, expiration, number of contracts and the prices you were filled at.</li>
-      <li>Type the <b>current stock price</b> and <b>current option prices</b> from your broker. Once automatic prices are switched on, most tickers fill in by themselves when you press <b>Refresh prices</b>.</li>
+      <li>Prices fill in by themselves for the <b>S&amp;P 500 plus SPY, QQQ, IWM and EWZ</b>. Press <b>Refresh prices</b> for the newest. For anything else, type the <b>current stock price</b> and <b>current option prices</b> from your broker.</li>
       <li>Read <b>Needs attention</b> first, then <b>Account exposure</b>.</li>
       <li>Open <b>Alert settings</b> and change the limits to match your own rules.</li>
     </ol>
@@ -370,14 +370,16 @@ i.line.s2 { border-color: var(--series-2); }
           <label>Earnings date <input type="date" id="f-earn"></label>
           <label>Ex-dividend date <input type="date" id="f-exdiv"></label>
         </div>
+        <p class="hint">For tickers on the automatic list these fill in by themselves. Anything you type here is used instead.</p>
         <div class="row2">
           <label>Beta <span class="opt">(1.0 is used if blank)</span> <input id="f-beta" inputmode="decimal" placeholder="e.g. 1.2"></label>
-          <label>Sector <input id="f-sector" autocomplete="off" placeholder="e.g. Technology" maxlength="40"></label>
+          <label>Dividend yield % <span class="opt">(0 if blank)</span> <input id="f-divy" inputmode="decimal" placeholder="e.g. 2.29"></label>
         </div>
         <div class="row2">
+          <label>Sector <input id="f-sector" autocomplete="off" placeholder="e.g. Technology" maxlength="40"></label>
           <label>Date opened <input type="date" id="f-open"></label>
-          <label>Notes <input id="f-notes" autocomplete="off" maxlength="200"></label>
         </div>
+        <label>Notes <input id="f-notes" autocomplete="off" maxlength="200"></label>
       </details>
       <ul class="errors" id="formErrors" hidden></ul>
     </div>
@@ -479,30 +481,38 @@ i.line.s2 { border-color: var(--series-2); }
     return 0.5 * (1 + sign * y);
   }
 
-  function bs(type, S, K, T, r, v) {
+  function normPdf(x) { return Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI); }
+
+  // Black-Scholes with a dividend yield dq (0.0229 means 2.29% a year).
+  // Per share: price, delta, gamma, theta (per calendar day), vega (per 1 point of implied volatility)
+  // and the probability of finishing in the money.
+  function bs(type, S, K, T, r, v, dq) {
+    dq = dq || 0;
     if (!(T > 0) || !(v > 0)) {
-      var intrinsic = type === 'call' ? Math.max(S - K, 0) : Math.max(K - S, 0);
-      var d = type === 'call' ? (S > K ? 1 : 0) : (S < K ? -1 : 0);
-      return { price: intrinsic, delta: d };
+      var itm = type === 'call' ? S > K : S < K;
+      return { price: type === 'call' ? Math.max(S - K, 0) : Math.max(K - S, 0),
+               delta: itm ? (type === 'call' ? 1 : -1) : 0, gamma: 0, theta: 0, vega: 0, probItm: itm ? 1 : 0 };
     }
-    var sq = v * Math.sqrt(T);
-    var d1 = (Math.log(S / K) + (r + 0.5 * v * v) * T) / sq;
-    var d2 = d1 - sq;
+    var rt = Math.sqrt(T), sq = v * rt, eq = Math.exp(-dq * T), er = Math.exp(-r * T);
+    var d1 = (Math.log(S / K) + (r - dq + 0.5 * v * v) * T) / sq, d2 = d1 - sq, pdf = normPdf(d1);
+    var gamma = eq * pdf / (S * sq), vega = S * eq * pdf * rt / 100, decay = -S * eq * pdf * v / (2 * rt);
     if (type === 'call') {
-      return { price: S * normCdf(d1) - K * Math.exp(-r * T) * normCdf(d2), delta: normCdf(d1) };
+      return { price: S * eq * normCdf(d1) - K * er * normCdf(d2), delta: eq * normCdf(d1), gamma: gamma, vega: vega,
+               theta: (decay - r * K * er * normCdf(d2) + dq * S * eq * normCdf(d1)) / 365, probItm: normCdf(d2) };
     }
-    return { price: K * Math.exp(-r * T) * normCdf(-d2) - S * normCdf(-d1), delta: normCdf(d1) - 1 };
+    return { price: K * er * normCdf(-d2) - S * eq * normCdf(-d1), delta: -eq * normCdf(-d1), gamma: gamma, vega: vega,
+             theta: (decay + r * K * er * normCdf(-d2) - dq * S * eq * normCdf(-d1)) / 365, probItm: normCdf(-d2) };
   }
 
   // Works backwards from an option's price to its implied volatility.
-  function impliedVol(type, price, S, K, T, r) {
+  function impliedVol(type, price, S, K, T, r, dq) {
     if (!(price >= 0) || !(S > 0) || !(K > 0) || !(T > 0)) return null;
     var lo = 0.005, hi = 5;
-    if (price <= bs(type, S, K, T, r, lo).price) return lo;
-    if (price >= bs(type, S, K, T, r, hi).price) return null;
+    if (price <= bs(type, S, K, T, r, lo, dq).price) return lo;
+    if (price >= bs(type, S, K, T, r, hi, dq).price) return null;
     for (var i = 0; i < 100; i++) {
       var mid = (lo + hi) / 2;
-      if (bs(type, S, K, T, r, mid).price > price) hi = mid; else lo = mid;
+      if (bs(type, S, K, T, r, mid, dq).price > price) hi = mid; else lo = mid;
       if (hi - lo < 1e-7) break;
     }
     return (lo + hi) / 2;
@@ -590,6 +600,11 @@ i.line.s2 { border-color: var(--series-2); }
     else if (num(p.stockPrice) > 0) { S = num(p.stockPrice); sSrc = 'typed'; }
     var beta = num(p.beta) !== null ? num(p.beta) : num(info.beta);
     out.S = S; out.sSrc = sSrc;
+    // Dividend yield: typed by the member, or the yearly dividend from the automatic info file
+    var dq = 0, dqSrc = null;
+    if (num(p.divYield) !== null && num(p.divYield) >= 0) { dq = num(p.divYield) / 100; dqSrc = 'typed'; }
+    else if (num(info.divRate) > 0 && S > 0) { dq = num(info.divRate) / S; dqSrc = 'auto'; }
+    out.dq = dq; out.dqSrc = dqSrc;
     out.beta = beta; out.betaUsed = beta === null ? 1 : beta;
     out.sector = (p.sector && String(p.sector).trim()) || info.sector || 'Unknown';
     out.earnings = p.earnings || info.earnings || null;
@@ -610,21 +625,25 @@ i.line.s2 { border-color: var(--series-2); }
       if (o && S > 0) {
         var quote = o.bid > 0 && o.ask > 0;
         if (fresh && quote) { mark = (o.bid + o.ask) / 2; mSrc = 'auto'; }
-        else if (o.iv > 0 && T > 0) { iv = o.iv; mark = bs(l.type, S, K, T, r, iv).price; mSrc = 'estimate'; }
+        else if (o.iv > 0 && T > 0) { iv = o.iv; mark = bs(l.type, S, K, T, r, iv, dq).price; mSrc = 'estimate'; }
         else if (quote) { mark = (o.bid + o.ask) / 2; mSrc = 'auto'; }
         else if (o.last > 0) { mark = o.last; mSrc = 'auto'; }
       }
       if (mark === null && num(l.mark) !== null && num(l.mark) >= 0) { mark = num(l.mark); mSrc = 'typed'; }
-      if (iv === null && mark !== null && S > 0 && T > 0) iv = impliedVol(l.type, mark, S, K, T, r);
-      var delta = null;
+      if (iv === null && mark !== null && S > 0 && T > 0) iv = impliedVol(l.type, mark, S, K, T, r, dq);
+      var g = null;
       if (S > 0 && T !== null) {
-        if (!(T > 0)) delta = bs(l.type, S, K, 0, r, 0).delta;
-        else if (iv) delta = bs(l.type, S, K, T, r, iv).delta;
+        if (!(T > 0)) g = bs(l.type, S, K, 0, r, 0, dq);
+        else if (iv) g = bs(l.type, S, K, T, r, iv, dq);
       }
+      var delta = g ? g.delta : null;
+      var per = function (x) { return g ? sign * x * 100 * q : null; };
       return {
         side: l.side, type: l.type, expiry: l.expiry, K: K, fill: fill, q: q, sign: sign, T: T, dte: dte,
         mark: mark, mSrc: mSrc, iv: iv, delta: delta,
+        gamma: g ? g.gamma : null, theta: g ? g.theta : null, vega: g ? g.vega : null, probItm: g ? g.probItm : null,
         posDelta: delta === null ? null : sign * delta * 100 * q,
+        posGamma: g ? per(g.gamma) : null, posTheta: g ? per(g.theta) : null, posVega: g ? per(g.vega) : null,
         pl: mark === null ? null : sign * (mark - fill) * 100 * q,
         itm: S > 0 ? (l.type === 'put' ? S < K : S > K) : null,
         otmPct: S > 0 ? (l.type === 'put' ? (S - K) / S : (K - S) / S) * 100 : null
@@ -697,7 +716,7 @@ i.line.s2 { border-color: var(--series-2); }
         maxLoss = debit; capital = debit;
         if (lc.iv && lc.T !== null && scl.T !== null) {
           var left = Math.max(lc.T - scl.T, 0);
-          maxProfit = bs('call', scl.K, lc.K, left, r, lc.iv).price * 100 * q - debit;
+          maxProfit = bs('call', scl.K, lc.K, left, r, lc.iv, dq).price * 100 * q - debit;
           maxProfitIsEstimate = true;
         }
         out.pmccMinShortStrike = lc.K + debit / (100 * q);
@@ -722,6 +741,10 @@ i.line.s2 { border-color: var(--series-2); }
     out.posDelta = deltaKnown ? sum(legs.map(function (l) { return l.posDelta; })) + Q : null;
     out.deltaDollars = (out.posDelta !== null && S > 0) ? out.posDelta * S : null;
     out.bwDeltaDollars = out.deltaDollars === null ? null : out.deltaDollars * out.betaUsed;
+    var tot = function (key) { return deltaKnown ? sum(legs.map(function (l) { return l[key]; })) : null; };
+    out.posGamma = tot('posGamma'); out.theta = tot('posTheta'); out.vega = tot('posVega');
+    // How much delta dollars change if SPY moves 1% (each stock moving by its beta)
+    out.gamma1pct = (out.posGamma !== null && S > 0) ? out.posGamma * out.betaUsed * 0.01 * S * S : null;
 
     var shortDtes = shortLegs.map(function (l) { return l.dte; });
     out.nearestDte = shortDtes.length ? Math.min.apply(null, shortDtes) : (legs.length ? Math.min.apply(null, legs.map(function (l) { return l.dte; })) : null);
@@ -854,7 +877,7 @@ i.line.s2 { border-color: var(--series-2); }
       if (l.T === null) { ok = false; return; }
       var v = l.T > 0 ? l.iv : 0.0001;
       if (!v) { ok = false; return; }
-      var p0 = bs(l.type, a.S, l.K, l.T, a.r, v).price, p1 = bs(l.type, newS, l.K, l.T, a.r, v).price;
+      var p0 = bs(l.type, a.S, l.K, l.T, a.r, v, a.dq).price, p1 = bs(l.type, newS, l.K, l.T, a.r, v, a.dq).price;
       chg += l.sign * (p1 - p0) * 100 * l.q;
     });
     var itmPuts = 0, cash = 0;
@@ -878,8 +901,8 @@ i.line.s2 { border-color: var(--series-2); }
       if (l.T === null) return null;
       var left = when.kind === 'now' ? l.T : Math.max(l.T - when.T, 0);
       var v;
-      if (!(left > 0)) v = bs(l.type, S2, l.K, 0, a.r, 0).price;
-      else if (l.iv) v = bs(l.type, S2, l.K, left, a.r, l.iv).price;
+      if (!(left > 0)) v = bs(l.type, S2, l.K, 0, a.r, 0, a.dq).price;
+      else if (l.iv) v = bs(l.type, S2, l.K, left, a.r, l.iv, a.dq).price;
       else return null;
       total += l.sign * (v - l.fill) * 100 * l.q;
     }
@@ -967,6 +990,10 @@ i.line.s2 { border-color: var(--series-2); }
     s.spyOnePct = s.bwDeltaDollars / 100;
     s.betaAssumed = good.filter(function (a) { return a.beta === null; }).map(function (a) { return a.ticker; });
 
+    var known = function (key) { return good.map(function (a) { return a[key]; }).filter(function (x) { return x !== null && x !== undefined; }); };
+    s.theta = sum(known('theta')); s.vega = sum(known('vega')); s.gamma1pct = sum(known('gamma1pct'));
+    s.greeksMissing = good.length - known('theta').length;
+    s.count = good.length;
     var plKnown = good.map(function (a) { return a.pl; });
     s.pl = sum(plKnown.filter(function (x) { return x !== null; }));
     s.plMissing = plKnown.filter(function (x) { return x === null; }).length;
@@ -1024,7 +1051,7 @@ i.line.s2 { border-color: var(--series-2); }
   var Core = {
     STRATEGIES: STRATEGIES, DEFAULTS: DEFAULTS, SEVERITY: SEVERITY, STRESS_MOVES: STRESS_MOVES,
     num: num, parseDate: parseDate, daysTo: daysTo, yearsTo: yearsTo, isoToday: isoToday,
-    bs: bs, impliedVol: impliedVol, normCdf: normCdf, lookupOption: lookupOption,
+    bs: bs, impliedVol: impliedVol, normCdf: normCdf, normPdf: normPdf, lookupOption: lookupOption,
     validate: validate, analyzePosition: analyzePosition, stressPosition: stressPosition,
     plAt: plAt, riskProfile: riskProfile, accountProfile: accountProfile, zeroCrossings: zeroCrossings,
     summarize: summarize, money: money, fmtD: fmtD, fmtK: fmtK
@@ -1093,9 +1120,11 @@ i.line.s2 { border-color: var(--series-2); }
     });
   }
   var money = C.money;
+  function money2(v) { if (v === null || v === undefined || !isFinite(v)) return '—'; return (v > 0 ? '+' : '') + money(v, 2); }
   function signedMoney(v) { if (v === null || v === undefined || !isFinite(v)) return '—'; return (v > 0 ? '+' : '') + money(v); }
   function cls(v) { return v > 0 ? 'pos' : (v < 0 ? 'neg' : ''); }
   function pct(v, d) { return (v === null || v === undefined || !isFinite(v)) ? '—' : v.toFixed(d === undefined ? 1 : d).replace('-', '−') + '%'; }
+  function pctOf(v) { return (v === null || v === undefined || !isFinite(v)) ? '—' : (v * 100).toFixed(1) + '%'; }
   function n2(v) { return (v === null || v === undefined || !isFinite(v)) ? '—' : v.toFixed(2); }
   function shortDate(s) {
     var t = C.parseDate(s); if (t === null) return '';
@@ -1447,6 +1476,14 @@ i.line.s2 { border-color: var(--series-2); }
       '<div class="d">' + (s.spyOnePct >= 0 ? 'Gain if SPY rises, loss if it falls' : 'Gain if SPY falls, loss if it rises') + ' (beta-weighted)</div></div>';
     tiles += '<div class="tile"><div class="k">Open P/L</div><div class="v ' + cls(s.pl) + '">' + signedMoney(s.pl) + '</div>' +
       '<div class="d">' + (s.plMissing ? s.plMissing + ' trade(s) missing prices left out' : 'All open trades') + '</div></div>';
+    tiles += '<div class="tile"><div class="k">Theta</div><div class="v ' + cls(s.theta) + '">' + money2(s.theta) + '</div>' +
+      '<div class="d">Per day from time decay, if nothing else changes</div></div>';
+    tiles += '<div class="tile"><div class="k">Vega</div><div class="v ' + cls(s.vega) + '">' + money2(s.vega) + '</div>' +
+      '<div class="d">If implied volatility rises 1 point on every trade</div></div>';
+    tiles += '<div class="tile"><div class="k">Gamma</div><div class="v ' + cls(s.gamma1pct) + '">' + signedMoney(s.gamma1pct) + '</div>' +
+      '<div class="d">Change in delta dollars if SPY rises 1%' + (s.gamma1pct < 0 ? '; negative means delta moves against you' : '') + '</div></div>';
+    tiles += '<div class="tile"><div class="k">Greeks cover</div><div class="v">' + (s.count - s.greeksMissing) + ' of ' + s.count + '</div>' +
+      '<div class="d">' + (s.greeksMissing ? s.greeksMissing + ' trade(s) need option prices to be included' : 'Every trade is included') + '</div></div>';
 
     var notes = [];
     notes.push('<b>Cash needed</b> counts the full strike × 100 for each short put, and the width of the spread × 100 for credit spreads and iron condors. <b>Capital</b> is that cash for short puts, the max loss for spreads, condors and PMCCs, and the market value for shares.');
@@ -1495,7 +1532,7 @@ i.line.s2 { border-color: var(--series-2); }
     return '<ul class="leglines">' + a.legs.map(function (l, i) {
       var role = a.st.legs[i] ? a.st.legs[i].role : '';
       return '<li><b>' + esc(role) + ' ' + C.fmtK(l.K) + '</b> · ' + shortDate(l.expiry) + ' · ' + (l.dte === null ? '—' : l.dte) + ' days<br>' +
-        'Filled ' + n2(l.fill) + ' · now ' + n2(l.mark) + srcTag(l.mSrc) + ' · delta ' + n2(l.delta) + ' · IV ' + (l.iv ? (l.iv * 100).toFixed(0) + '%' : '—') +
+        'Filled ' + n2(l.fill) + ' · now ' + n2(l.mark) + srcTag(l.mSrc) + ' · delta ' + n2(l.delta) + ' · IV ' + (l.iv ? (l.iv * 100).toFixed(1) + '%' : '—') + ' · Prob ITM ' + pctOf(l.probItm) +
         ' · P/L <span class="' + cls(l.pl) + '">' + signedMoney(l.pl) + '</span></li>';
     }).join('') + '</ul>';
   }
@@ -1507,9 +1544,9 @@ i.line.s2 { border-color: var(--series-2); }
     var legRows = a.legs.map(function (l, i) {
       var role = a.st.legs[i] ? a.st.legs[i].role : '';
       return '<tr><td>' + esc(role) + '</td><td class="n">' + C.fmtK(l.K) + '</td><td>' + shortDate(l.expiry) + '</td><td class="n">' + (l.dte === null ? '—' : l.dte) + '</td>' +
-        '<td class="n">' + n2(l.fill) + '</td><td class="n">' + n2(l.mark) + srcTag(l.mSrc) + '</td><td class="n">' + n2(l.delta) + '</td><td class="n">' + (l.iv ? (l.iv * 100).toFixed(0) + '%' : '—') + '</td><td class="n ' + cls(l.pl) + '">' + signedMoney(l.pl) + '</td></tr>';
+        '<td class="n">' + n2(l.fill) + '</td><td class="n">' + n2(l.mark) + srcTag(l.mSrc) + '</td><td class="n">' + n2(l.delta) + '</td><td class="n">' + (l.iv ? (l.iv * 100).toFixed(1) + '%' : '—') + '</td><td class="n">' + pctOf(l.probItm) + '</td><td class="n ' + cls(l.pl) + '">' + signedMoney(l.pl) + '</td></tr>';
     }).join('');
-    var legTable = !a.legs.length ? '' : compact ? legLines(a) : '<table class="legtable"><thead><tr><th>Leg</th><th class="n">Strike</th><th>Expires</th><th class="n">Days</th><th class="n">Filled</th><th class="n">Now</th><th class="n">Delta</th><th class="n">IV</th><th class="n">P/L</th></tr></thead><tbody>' + legRows + '</tbody></table>';
+    var legTable = !a.legs.length ? '' : compact ? legLines(a) : '<table class="legtable"><thead><tr><th>Leg</th><th class="n">Strike</th><th>Expires</th><th class="n">Days</th><th class="n">Filled</th><th class="n">Now</th><th class="n">Delta</th><th class="n">IV</th><th class="n" title="Chance this option finishes in the money, based on its implied volatility">Prob ITM</th><th class="n">P/L</th></tr></thead><tbody>' + legRows + '</tbody></table>';
     var shares = a.Q ? '<p class="small">' + a.Q + ' shares at ' + n2(a.C) + ' cost · P/L ' + signedMoney(a.sharesPL) + '</p>' : '';
     var kv = [
       ['Stock price', n2(a.S) + srcTag(a.sSrc)],
@@ -1521,6 +1558,10 @@ i.line.s2 { border-color: var(--series-2); }
       ['Position delta', a.posDelta === null ? '—' : a.posDelta.toFixed(1)],
       ['Delta $', signedMoney(a.deltaDollars)],
       ['Beta-weighted delta $', signedMoney(a.bwDeltaDollars) + (a.beta === null ? ' (beta 1.0 used)' : ' (beta ' + a.beta + ')')],
+      ['Theta per day', money2(a.theta)],
+      ['Gamma', a.posGamma === null ? '—' : a.posGamma.toFixed(3) + ' <span class="src">delta change per $1 move</span>'],
+      ['Vega', a.vega === null ? '—' : money2(a.vega) + ' <span class="src">per 1 point of IV</span>'],
+      ['Dividend yield', (a.dq * 100).toFixed(2) + '%' + srcTag(a.dqSrc)],
       ['Sector', esc(a.sector)],
       ['Earnings', a.earnings ? C.fmtD(a.earnings) : '—'],
       ['Ex-dividend', a.exDiv ? C.fmtD(a.exDiv) : '—']
@@ -1553,18 +1594,20 @@ i.line.s2 { border-color: var(--series-2); }
         '<td class="n">' + dte + '</td><td class="n">' + (ok ? n2(a.S) + srcTag(a.sSrc) : '—') + '</td>' +
         '<td class="n ' + (ok ? cls(a.pl) : '') + '">' + (ok ? signedMoney(a.pl) : '—') + '</td><td class="n">' + cap + '</td>' +
         '<td class="n">' + (ok ? money(a.maxLoss) : '—') + '</td><td class="n ' + (ok ? cls(a.deltaDollars) : '') + '">' + (ok ? signedMoney(a.deltaDollars) : '—') + '</td>' +
+        '<td class="n ' + (ok ? cls(a.theta) : '') + '">' + (ok ? money2(a.theta) : '—') + '</td>' +
         '<td class="acts">' + acts + '</td></tr>';
-      if (openDetails[p.id]) rows += '<tr class="detail-row"><td colspan="9">' + detailHtml(a, p) + '</td></tr>';
+      if (openDetails[p.id]) rows += '<tr class="detail-row"><td colspan="10">' + detailHtml(a, p) + '</td></tr>';
 
       cards += '<div class="pcard"><div class="top2"><div><b>' + esc(a.ticker) + '</b><span class="tag">' + esc(a.st ? a.st.short : '?') + '</span></div><span class="pill ' + a.status + '">' + STATUS_TEXT[a.status] + '</span></div>' +
         '<div class="legs">' + esc(describe(p)) + '</div>' +
         '<dl><dt>Days left</dt><dd>' + dte + '</dd><dt>Stock</dt><dd>' + (ok ? n2(a.S) : '—') + '</dd>' +
         '<dt>P/L</dt><dd class="' + (ok ? cls(a.pl) : '') + '">' + (ok ? signedMoney(a.pl) : '—') + '</dd><dt>Profit captured</dt><dd>' + cap + '</dd>' +
-        '<dt>Max loss</dt><dd>' + (ok ? money(a.maxLoss) : '—') + '</dd><dt>Delta $</dt><dd>' + (ok ? signedMoney(a.deltaDollars) : '—') + '</dd></dl>' +
+        '<dt>Max loss</dt><dd>' + (ok ? money(a.maxLoss) : '—') + '</dd><dt>Delta $</dt><dd>' + (ok ? signedMoney(a.deltaDollars) : '—') + '</dd>' +
+        '<dt>Theta/day</dt><dd>' + (ok ? money2(a.theta) : '—') + '</dd></dl>' +
         (openDetails[p.id] ? '<div class="detail-box">' + detailHtml(a, p, true) + '</div>' : '') +
         '<div class="acts">' + acts + '</div></div>';
     });
-    el.innerHTML = '<table class="ptable"><thead><tr><th>Status</th><th>Trade</th><th class="n">Days left</th><th class="n">Stock</th><th class="n">P/L</th><th class="n">Profit captured</th><th class="n">Max loss</th><th class="n">Delta $</th><th></th></tr></thead><tbody>' +
+    el.innerHTML = '<table class="ptable"><thead><tr><th>Status</th><th>Trade</th><th class="n">Days left</th><th class="n">Stock</th><th class="n">P/L</th><th class="n">Profit captured</th><th class="n">Max loss</th><th class="n">Delta $</th><th class="n">Theta/day</th><th></th></tr></thead><tbody>' +
       rows + '</tbody></table><div class="pcards">' + cards + '</div>' +
       '<p class="note">"Days left" is for the nearest short option. "Profit captured" is the share of the credit you have kept so far (for covered calls and PMCCs, of the short call). <span class="src">auto</span> = filled in automatically, <span class="src">typed</span> = typed by you, <span class="src">est.</span> = estimated between full option updates.</p>';
     drawCharts();
@@ -1621,6 +1664,7 @@ i.line.s2 { border-color: var(--series-2); }
     $('f-earn').value = p ? (p.earnings || '') : '';
     $('f-exdiv').value = p ? (p.exDiv || '') : '';
     $('f-beta').value = p ? (p.beta || '') : '';
+    $('f-divy').value = p ? (p.divYield || '') : '';
     $('f-sector').value = p ? (p.sector || '') : '';
     $('f-open').value = p ? (p.openDate || '') : '';
     $('f-notes').value = p ? (p.notes || '') : '';
@@ -1636,7 +1680,7 @@ i.line.s2 { border-color: var(--series-2); }
     var p = {
       id: editingId || newId(), strategy: strategy, ticker: v('f-ticker').toUpperCase(),
       qty: st.legs.length ? C.num(v('f-qty')) : null, stockPrice: v('f-stock'),
-      earnings: v('f-earn'), exDiv: v('f-exdiv'), beta: v('f-beta'), sector: v('f-sector'), openDate: v('f-open'), notes: v('f-notes'),
+      earnings: v('f-earn'), exDiv: v('f-exdiv'), beta: v('f-beta'), divYield: v('f-divy'), sector: v('f-sector'), openDate: v('f-open'), notes: v('f-notes'),
       legs: st.legs.map(function (t, i) {
         return { side: t.side, type: t.type, strike: v('f-strike-' + i), expiry: v(t.exp === 'b' ? 'f-exp-b' : 'f-exp-a'), fill: v('f-fill-' + i), mark: v('f-mark-' + i) };
       })
@@ -1693,12 +1737,12 @@ i.line.s2 { border-color: var(--series-2); }
   function csvCell(v) { var s = v === null || v === undefined ? '' : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
   function round2(v) { return v === null || v === undefined || !isFinite(v) ? '' : Math.round(v * 100) / 100; }
   function downloadCsv() {
-    var head = ['Ticker', 'Strategy', 'Trade', 'Status', 'Stock price', 'Days left (nearest short)', 'P/L', 'Profit captured %', 'Max profit', 'Max loss', 'Cash needed', 'Position delta', 'Delta $', 'Beta-weighted delta $', 'Sector', 'Earnings', 'Ex-dividend', 'Alerts'];
+    var head = ['Ticker', 'Strategy', 'Trade', 'Status', 'Stock price', 'Days left (nearest short)', 'P/L', 'Profit captured %', 'Max profit', 'Max loss', 'Cash needed', 'Position delta', 'Delta $', 'Beta-weighted delta $', 'Theta/day', 'Gamma', 'Vega', 'Sector', 'Earnings', 'Ex-dividend', 'Alerts'];
     var lines = [head.map(csvCell).join(',')];
     analyses.forEach(function (a, i) {
       var p = state.positions[i];
       lines.push([a.ticker, a.st ? a.st.name : '', describe(p), STATUS_TEXT[a.status], round2(a.S), a.nearestDte, round2(a.pl), a.captured === null || a.captured === undefined ? '' : Math.round(a.captured),
-        round2(a.maxProfit), round2(a.maxLoss), round2(a.collateral), a.posDelta === null || a.posDelta === undefined ? '' : Math.round(a.posDelta * 10) / 10, round2(a.deltaDollars), round2(a.bwDeltaDollars),
+        round2(a.maxProfit), round2(a.maxLoss), round2(a.collateral), a.posDelta === null || a.posDelta === undefined ? '' : Math.round(a.posDelta * 10) / 10, round2(a.deltaDollars), round2(a.bwDeltaDollars), round2(a.theta), a.posGamma === null || a.posGamma === undefined ? '' : Math.round(a.posGamma * 1000) / 1000, round2(a.vega),
         a.sector || '', a.earnings || '', a.exDiv || '', (a.flags || []).map(function (f) { return f.text; }).join(' | ')].map(csvCell).join(','));
     });
     if (summary) {
@@ -1709,6 +1753,9 @@ i.line.s2 { border-color: var(--series-2); }
       lines.push(['Delta $', round2(summary.deltaDollars)].map(csvCell).join(','));
       lines.push(['Beta-weighted delta $', round2(summary.bwDeltaDollars)].map(csvCell).join(','));
       lines.push(['Open P/L', round2(summary.pl)].map(csvCell).join(','));
+      lines.push(['Theta/day', round2(summary.theta)].map(csvCell).join(','));
+      lines.push(['Vega (per 1 IV point)', round2(summary.vega)].map(csvCell).join(','));
+      lines.push(['Gamma (delta $ change per 1% SPY)', round2(summary.gamma1pct)].map(csvCell).join(','));
     }
     download('options-risk-check-' + C.isoToday(new Date()) + '.csv', '﻿' + lines.join('\r\n'), 'text/csv');
     toast('Spreadsheet saved to your downloads.');

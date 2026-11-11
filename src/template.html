@@ -43,7 +43,7 @@
     <ol>
       <li>Enter your <b>account value</b> and <b>cash available</b> below.</li>
       <li>Add each open trade with <b>+ Add trade</b>. Pick the strategy, then fill in the strikes, expiration, number of contracts and the prices you were filled at.</li>
-      <li>Type the <b>current stock price</b> and <b>current option prices</b> from your broker. Once automatic prices are switched on, most tickers fill in by themselves when you press <b>Refresh prices</b>.</li>
+      <li>Prices fill in by themselves for the <b>S&amp;P 500 plus SPY, QQQ, IWM and EWZ</b>. Press <b>Refresh prices</b> for the newest. For anything else, type the <b>current stock price</b> and <b>current option prices</b> from your broker.</li>
       <li>Read <b>Needs attention</b> first, then <b>Account exposure</b>.</li>
       <li>Open <b>Alert settings</b> and change the limits to match your own rules.</li>
     </ol>
@@ -129,14 +129,16 @@
           <label>Earnings date <input type="date" id="f-earn"></label>
           <label>Ex-dividend date <input type="date" id="f-exdiv"></label>
         </div>
+        <p class="hint">For tickers on the automatic list these fill in by themselves. Anything you type here is used instead.</p>
         <div class="row2">
           <label>Beta <span class="opt">(1.0 is used if blank)</span> <input id="f-beta" inputmode="decimal" placeholder="e.g. 1.2"></label>
-          <label>Sector <input id="f-sector" autocomplete="off" placeholder="e.g. Technology" maxlength="40"></label>
+          <label>Dividend yield % <span class="opt">(0 if blank)</span> <input id="f-divy" inputmode="decimal" placeholder="e.g. 2.29"></label>
         </div>
         <div class="row2">
+          <label>Sector <input id="f-sector" autocomplete="off" placeholder="e.g. Technology" maxlength="40"></label>
           <label>Date opened <input type="date" id="f-open"></label>
-          <label>Notes <input id="f-notes" autocomplete="off" maxlength="200"></label>
         </div>
+        <label>Notes <input id="f-notes" autocomplete="off" maxlength="200"></label>
       </details>
       <ul class="errors" id="formErrors" hidden></ul>
     </div>

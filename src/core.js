@@ -88,30 +88,38 @@
     return 0.5 * (1 + sign * y);
   }
 
-  function bs(type, S, K, T, r, v) {
+  function normPdf(x) { return Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI); }
+
+  // Black-Scholes with a dividend yield dq (0.0229 means 2.29% a year).
+  // Per share: price, delta, gamma, theta (per calendar day), vega (per 1 point of implied volatility)
+  // and the probability of finishing in the money.
+  function bs(type, S, K, T, r, v, dq) {
+    dq = dq || 0;
     if (!(T > 0) || !(v > 0)) {
-      var intrinsic = type === 'call' ? Math.max(S - K, 0) : Math.max(K - S, 0);
-      var d = type === 'call' ? (S > K ? 1 : 0) : (S < K ? -1 : 0);
-      return { price: intrinsic, delta: d };
+      var itm = type === 'call' ? S > K : S < K;
+      return { price: type === 'call' ? Math.max(S - K, 0) : Math.max(K - S, 0),
+               delta: itm ? (type === 'call' ? 1 : -1) : 0, gamma: 0, theta: 0, vega: 0, probItm: itm ? 1 : 0 };
     }
-    var sq = v * Math.sqrt(T);
-    var d1 = (Math.log(S / K) + (r + 0.5 * v * v) * T) / sq;
-    var d2 = d1 - sq;
+    var rt = Math.sqrt(T), sq = v * rt, eq = Math.exp(-dq * T), er = Math.exp(-r * T);
+    var d1 = (Math.log(S / K) + (r - dq + 0.5 * v * v) * T) / sq, d2 = d1 - sq, pdf = normPdf(d1);
+    var gamma = eq * pdf / (S * sq), vega = S * eq * pdf * rt / 100, decay = -S * eq * pdf * v / (2 * rt);
     if (type === 'call') {
-      return { price: S * normCdf(d1) - K * Math.exp(-r * T) * normCdf(d2), delta: normCdf(d1) };
+      return { price: S * eq * normCdf(d1) - K * er * normCdf(d2), delta: eq * normCdf(d1), gamma: gamma, vega: vega,
+               theta: (decay - r * K * er * normCdf(d2) + dq * S * eq * normCdf(d1)) / 365, probItm: normCdf(d2) };
     }
-    return { price: K * Math.exp(-r * T) * normCdf(-d2) - S * normCdf(-d1), delta: normCdf(d1) - 1 };
+    return { price: K * er * normCdf(-d2) - S * eq * normCdf(-d1), delta: -eq * normCdf(-d1), gamma: gamma, vega: vega,
+             theta: (decay + r * K * er * normCdf(-d2) - dq * S * eq * normCdf(-d1)) / 365, probItm: normCdf(-d2) };
   }
 
   // Works backwards from an option's price to its implied volatility.
-  function impliedVol(type, price, S, K, T, r) {
+  function impliedVol(type, price, S, K, T, r, dq) {
     if (!(price >= 0) || !(S > 0) || !(K > 0) || !(T > 0)) return null;
     var lo = 0.005, hi = 5;
-    if (price <= bs(type, S, K, T, r, lo).price) return lo;
-    if (price >= bs(type, S, K, T, r, hi).price) return null;
+    if (price <= bs(type, S, K, T, r, lo, dq).price) return lo;
+    if (price >= bs(type, S, K, T, r, hi, dq).price) return null;
     for (var i = 0; i < 100; i++) {
       var mid = (lo + hi) / 2;
-      if (bs(type, S, K, T, r, mid).price > price) hi = mid; else lo = mid;
+      if (bs(type, S, K, T, r, mid, dq).price > price) hi = mid; else lo = mid;
       if (hi - lo < 1e-7) break;
     }
     return (lo + hi) / 2;
@@ -199,6 +207,11 @@
     else if (num(p.stockPrice) > 0) { S = num(p.stockPrice); sSrc = 'typed'; }
     var beta = num(p.beta) !== null ? num(p.beta) : num(info.beta);
     out.S = S; out.sSrc = sSrc;
+    // Dividend yield: typed by the member, or the yearly dividend from the automatic info file
+    var dq = 0, dqSrc = null;
+    if (num(p.divYield) !== null && num(p.divYield) >= 0) { dq = num(p.divYield) / 100; dqSrc = 'typed'; }
+    else if (num(info.divRate) > 0 && S > 0) { dq = num(info.divRate) / S; dqSrc = 'auto'; }
+    out.dq = dq; out.dqSrc = dqSrc;
     out.beta = beta; out.betaUsed = beta === null ? 1 : beta;
     out.sector = (p.sector && String(p.sector).trim()) || info.sector || 'Unknown';
     out.earnings = p.earnings || info.earnings || null;
@@ -219,21 +232,25 @@
       if (o && S > 0) {
         var quote = o.bid > 0 && o.ask > 0;
         if (fresh && quote) { mark = (o.bid + o.ask) / 2; mSrc = 'auto'; }
-        else if (o.iv > 0 && T > 0) { iv = o.iv; mark = bs(l.type, S, K, T, r, iv).price; mSrc = 'estimate'; }
+        else if (o.iv > 0 && T > 0) { iv = o.iv; mark = bs(l.type, S, K, T, r, iv, dq).price; mSrc = 'estimate'; }
         else if (quote) { mark = (o.bid + o.ask) / 2; mSrc = 'auto'; }
         else if (o.last > 0) { mark = o.last; mSrc = 'auto'; }
       }
       if (mark === null && num(l.mark) !== null && num(l.mark) >= 0) { mark = num(l.mark); mSrc = 'typed'; }
-      if (iv === null && mark !== null && S > 0 && T > 0) iv = impliedVol(l.type, mark, S, K, T, r);
-      var delta = null;
+      if (iv === null && mark !== null && S > 0 && T > 0) iv = impliedVol(l.type, mark, S, K, T, r, dq);
+      var g = null;
       if (S > 0 && T !== null) {
-        if (!(T > 0)) delta = bs(l.type, S, K, 0, r, 0).delta;
-        else if (iv) delta = bs(l.type, S, K, T, r, iv).delta;
+        if (!(T > 0)) g = bs(l.type, S, K, 0, r, 0, dq);
+        else if (iv) g = bs(l.type, S, K, T, r, iv, dq);
       }
+      var delta = g ? g.delta : null;
+      var per = function (x) { return g ? sign * x * 100 * q : null; };
       return {
         side: l.side, type: l.type, expiry: l.expiry, K: K, fill: fill, q: q, sign: sign, T: T, dte: dte,
         mark: mark, mSrc: mSrc, iv: iv, delta: delta,
+        gamma: g ? g.gamma : null, theta: g ? g.theta : null, vega: g ? g.vega : null, probItm: g ? g.probItm : null,
         posDelta: delta === null ? null : sign * delta * 100 * q,
+        posGamma: g ? per(g.gamma) : null, posTheta: g ? per(g.theta) : null, posVega: g ? per(g.vega) : null,
         pl: mark === null ? null : sign * (mark - fill) * 100 * q,
         itm: S > 0 ? (l.type === 'put' ? S < K : S > K) : null,
         otmPct: S > 0 ? (l.type === 'put' ? (S - K) / S : (K - S) / S) * 100 : null
@@ -306,7 +323,7 @@
         maxLoss = debit; capital = debit;
         if (lc.iv && lc.T !== null && scl.T !== null) {
           var left = Math.max(lc.T - scl.T, 0);
-          maxProfit = bs('call', scl.K, lc.K, left, r, lc.iv).price * 100 * q - debit;
+          maxProfit = bs('call', scl.K, lc.K, left, r, lc.iv, dq).price * 100 * q - debit;
           maxProfitIsEstimate = true;
         }
         out.pmccMinShortStrike = lc.K + debit / (100 * q);
@@ -331,6 +348,10 @@
     out.posDelta = deltaKnown ? sum(legs.map(function (l) { return l.posDelta; })) + Q : null;
     out.deltaDollars = (out.posDelta !== null && S > 0) ? out.posDelta * S : null;
     out.bwDeltaDollars = out.deltaDollars === null ? null : out.deltaDollars * out.betaUsed;
+    var tot = function (key) { return deltaKnown ? sum(legs.map(function (l) { return l[key]; })) : null; };
+    out.posGamma = tot('posGamma'); out.theta = tot('posTheta'); out.vega = tot('posVega');
+    // How much delta dollars change if SPY moves 1% (each stock moving by its beta)
+    out.gamma1pct = (out.posGamma !== null && S > 0) ? out.posGamma * out.betaUsed * 0.01 * S * S : null;
 
     var shortDtes = shortLegs.map(function (l) { return l.dte; });
     out.nearestDte = shortDtes.length ? Math.min.apply(null, shortDtes) : (legs.length ? Math.min.apply(null, legs.map(function (l) { return l.dte; })) : null);
@@ -463,7 +484,7 @@
       if (l.T === null) { ok = false; return; }
       var v = l.T > 0 ? l.iv : 0.0001;
       if (!v) { ok = false; return; }
-      var p0 = bs(l.type, a.S, l.K, l.T, a.r, v).price, p1 = bs(l.type, newS, l.K, l.T, a.r, v).price;
+      var p0 = bs(l.type, a.S, l.K, l.T, a.r, v, a.dq).price, p1 = bs(l.type, newS, l.K, l.T, a.r, v, a.dq).price;
       chg += l.sign * (p1 - p0) * 100 * l.q;
     });
     var itmPuts = 0, cash = 0;
@@ -487,8 +508,8 @@
       if (l.T === null) return null;
       var left = when.kind === 'now' ? l.T : Math.max(l.T - when.T, 0);
       var v;
-      if (!(left > 0)) v = bs(l.type, S2, l.K, 0, a.r, 0).price;
-      else if (l.iv) v = bs(l.type, S2, l.K, left, a.r, l.iv).price;
+      if (!(left > 0)) v = bs(l.type, S2, l.K, 0, a.r, 0, a.dq).price;
+      else if (l.iv) v = bs(l.type, S2, l.K, left, a.r, l.iv, a.dq).price;
       else return null;
       total += l.sign * (v - l.fill) * 100 * l.q;
     }
@@ -576,6 +597,10 @@
     s.spyOnePct = s.bwDeltaDollars / 100;
     s.betaAssumed = good.filter(function (a) { return a.beta === null; }).map(function (a) { return a.ticker; });
 
+    var known = function (key) { return good.map(function (a) { return a[key]; }).filter(function (x) { return x !== null && x !== undefined; }); };
+    s.theta = sum(known('theta')); s.vega = sum(known('vega')); s.gamma1pct = sum(known('gamma1pct'));
+    s.greeksMissing = good.length - known('theta').length;
+    s.count = good.length;
     var plKnown = good.map(function (a) { return a.pl; });
     s.pl = sum(plKnown.filter(function (x) { return x !== null; }));
     s.plMissing = plKnown.filter(function (x) { return x === null; }).length;
@@ -633,7 +658,7 @@
   var Core = {
     STRATEGIES: STRATEGIES, DEFAULTS: DEFAULTS, SEVERITY: SEVERITY, STRESS_MOVES: STRESS_MOVES,
     num: num, parseDate: parseDate, daysTo: daysTo, yearsTo: yearsTo, isoToday: isoToday,
-    bs: bs, impliedVol: impliedVol, normCdf: normCdf, lookupOption: lookupOption,
+    bs: bs, impliedVol: impliedVol, normCdf: normCdf, normPdf: normPdf, lookupOption: lookupOption,
     validate: validate, analyzePosition: analyzePosition, stressPosition: stressPosition,
     plAt: plAt, riskProfile: riskProfile, accountProfile: accountProfile, zeroCrossings: zeroCrossings,
     summarize: summarize, money: money, fmtD: fmtD, fmtK: fmtK

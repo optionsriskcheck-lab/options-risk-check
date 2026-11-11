@@ -18,7 +18,7 @@ A scheduled job runs on GitHub's computers and saves price files next to the pag
 | Option chains | once a day, starting 12:10 PM / 1:10 PM (takes about 1 to 1.5 hours) |
 | Earnings, ex-dividend dates, beta, S&P 500 list | early morning, weekdays |
 
-Between option-chain pulls, the page estimates option prices from the newest stock price. If a run fails, the last good prices are kept and the page warns when prices are old. For tickers or expiration dates not on the list, members type the prices in.
+Between option-chain pulls, the page estimates option prices from the newest stock price. The option math includes each stock's dividend yield, and the page shows delta, gamma, theta, vega and probability in the money. If a run fails, the last good prices are kept and the page warns when prices are old. For tickers or expiration dates not on the list, members type the prices in.
 
 Yahoo data is meant for personal use, and Yahoo can slow down or block heavy use. This is a free tool with no guarantee.
 

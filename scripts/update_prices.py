@@ -95,28 +95,30 @@ def norm_cdf(x):
     return 0.5 * (1 + math.erf(x / math.sqrt(2)))
 
 
-def bs_price(kind, S, K, T, r, v):
+def bs_price(kind, S, K, T, r, v, q=0.0):
+    """q is the dividend yield (0.0229 means 2.29% a year)."""
     if T <= 0 or v <= 0:
         return max(S - K, 0.0) if kind == "C" else max(K - S, 0.0)
     sq = v * math.sqrt(T)
-    d1 = (math.log(S / K) + (r + 0.5 * v * v) * T) / sq
+    d1 = (math.log(S / K) + (r - q + 0.5 * v * v) * T) / sq
     d2 = d1 - sq
+    eq, er = math.exp(-q * T), math.exp(-r * T)
     if kind == "C":
-        return S * norm_cdf(d1) - K * math.exp(-r * T) * norm_cdf(d2)
-    return K * math.exp(-r * T) * norm_cdf(-d2) - S * norm_cdf(-d1)
+        return S * eq * norm_cdf(d1) - K * er * norm_cdf(d2)
+    return K * er * norm_cdf(-d2) - S * eq * norm_cdf(-d1)
 
 
-def implied_vol(kind, price, S, K, T, r):
+def implied_vol(kind, price, S, K, T, r, q=0.0):
     if not (price >= 0 and S > 0 and K > 0 and T > 0):
         return None
     lo, hi = 0.005, 5.0
-    if price <= bs_price(kind, S, K, T, r, lo):
+    if price <= bs_price(kind, S, K, T, r, lo, q):
         return lo
-    if price >= bs_price(kind, S, K, T, r, hi):
+    if price >= bs_price(kind, S, K, T, r, hi, q):
         return None
     for _ in range(100):
         mid = (lo + hi) / 2
-        if bs_price(kind, S, K, T, r, mid) > price:
+        if bs_price(kind, S, K, T, r, mid, q) > price:
             hi = mid
         else:
             lo = mid
@@ -300,7 +302,7 @@ def pick_expirations(exps, today):
     return near, far[:5]
 
 
-def chain_rows(kind, df, S, T, lo_hi):
+def chain_rows(kind, df, S, T, lo_hi, q=0.0):
     rows = []
     lo, hi = lo_hi
     for r in df.itertuples(index=False):
@@ -312,14 +314,14 @@ def chain_rows(kind, df, S, T, lo_hi):
         iv = None
         if S and T > 0:
             if bid > 0 and ask >= bid:
-                iv = implied_vol(kind, (bid + ask) / 2, S, K, T, RATE)
+                iv = implied_vol(kind, (bid + ask) / 2, S, K, T, RATE, q)
             elif 0.01 < yiv < 5:
                 iv = yiv
         rows.append([round(K, 2), round(bid, 2), round(ask, 2), round(last, 2), round(iv, 4) if iv else 0])
     return rows
 
 
-def fetch_chain(yf, tk, S_hint, pacer, today):
+def fetch_chain(yf, tk, S_hint, pacer, today, div_rate=0.0):
     t = yf.Ticker(tk)
     exps = t.options
     pacer.wait()
@@ -334,11 +336,12 @@ def fetch_chain(yf, tk, S_hint, pacer, today):
         if isinstance(und, dict) and num(und.get("regularMarketPrice")) > 0:
             S = num(und.get("regularMarketPrice"))
         T = years_to(e)
+        q = (div_rate / S) if (S and div_rate) else 0.0
         if d in near:
-            out["exps"][e] = {"P": chain_rows("P", ch.puts, S, T, PUT_RANGE),
-                              "C": chain_rows("C", ch.calls, S, T, PUT_RANGE)}
+            out["exps"][e] = {"P": chain_rows("P", ch.puts, S, T, PUT_RANGE, q),
+                              "C": chain_rows("C", ch.calls, S, T, PUT_RANGE, q)}
         else:
-            out["exps"][e] = {"C": chain_rows("C", ch.calls, S, T, FAR_CALL_RANGE)}
+            out["exps"][e] = {"C": chain_rows("C", ch.calls, S, T, FAR_CALL_RANGE, q)}
     out["S"] = round(S, 4) if S else None
     out["updated"] = now_iso()
     return out
@@ -352,6 +355,7 @@ def update_chains(yf, uni, out_dir, minutes, delay=0.6):
     start = int(meta.get("chains_cursor", 0)) % n if n else 0
     order = tickers[start:] + tickers[:start]
     stocks = read_json(os.path.join(out_dir, "stocks.json"), {}).get("stocks", {})
+    info = read_json(os.path.join(out_dir, "info.json"), {}).get("info", {})
     pacer = Pacer(delay)
     today = chicago_today()
     t0 = time.time()
@@ -363,7 +367,7 @@ def update_chains(yf, uni, out_dir, minutes, delay=0.6):
             stopped = True
             break
         try:
-            res = fetch_chain(yf, tk, stocks.get(tk), pacer, today)
+            res = fetch_chain(yf, tk, stocks.get(tk), pacer, today, num((info.get(tk) or {}).get("divRate")))
             if res["exps"]:
                 write_json(os.path.join(out_dir, "chains", f"{tk}.json"), res)
                 saved += 1
@@ -417,11 +421,11 @@ def update_info(yf, uni, out_dir, delay=0.5):
     old = read_json(path, {})
     info = {k: v for k, v in (old.get("info") or {}).items() if k in uni}
     today = chicago_today()
-    beta_updated = old.get("beta_updated")
-    do_beta = True
-    if beta_updated:
+    weekly_updated = old.get("weekly_updated")  # beta and yearly dividend change slowly
+    do_weekly = True
+    if weekly_updated:
         try:
-            do_beta = (datetime.now(timezone.utc) - datetime.fromisoformat(beta_updated.replace("Z", "+00:00"))).days >= 6
+            do_weekly = (datetime.now(timezone.utc) - datetime.fromisoformat(weekly_updated.replace("Z", "+00:00"))).days >= 6
         except ValueError:
             pass
     pacer = Pacer(delay)
@@ -435,12 +439,15 @@ def update_info(yf, uni, out_dir, delay=0.5):
             pacer.wait()
             rec["earnings"] = first_future(cal.get("Earnings Date"), today)
             rec["exdiv"] = first_future(cal.get("Ex-Dividend Date"), today)
-            if do_beta:
+            if do_weekly:
                 inf = t.info or {}
                 pacer.wait()
                 b = inf.get("beta") or inf.get("beta3Year")
                 if isinstance(b, (int, float)) and math.isfinite(b):
                     rec["beta"] = round(float(b), 2)
+                # yearly dividend in dollars per share (0 if none)
+                dr = inf.get("dividendRate") or inf.get("trailingAnnualDividendRate") or 0
+                rec["divRate"] = round(float(dr), 4) if isinstance(dr, (int, float)) and math.isfinite(dr) and dr > 0 else 0
             pacer.ok()
             count += 1
         except Exception as e:
@@ -452,7 +459,7 @@ def update_info(yf, uni, out_dir, delay=0.5):
     for tk, sector in uni.items():  # sectors even for tickers we didn't reach
         info.setdefault(tk, {})["sector"] = sector
     write_json(path, {"updated": now_iso(),
-                      "beta_updated": now_iso() if do_beta and count else beta_updated,
+                      "weekly_updated": now_iso() if do_weekly and count else weekly_updated,
                       "info": info})
     log(f"Earnings / ex-dividend / beta: {count} tickers updated")
     return count > 0

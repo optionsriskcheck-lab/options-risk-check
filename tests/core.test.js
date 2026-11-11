@@ -172,5 +172,51 @@ const ap = C.accountProfile(all);
 near('account profile 0% move = 0', ap.chg[ap.moves.indexOf(0)], 0, 1e-6);
 near('account profile -10% matches stress test', ap.chg[ap.moves.indexOf(-10)], sm.stress[1].chg, 1e-6);
 
+// ---- Dividends and Greeks
+// Put-call parity with a dividend yield
+const cq = C.bs('call', 100, 95, 0.5, 0.04, 0.3, 0.03).price, pq = C.bs('put', 100, 95, 0.5, 0.04, 0.3, 0.03).price;
+near('parity with dividends', cq - pq, 100 * Math.exp(-0.03 * 0.5) - 95 * Math.exp(-0.04 * 0.5), 1e-6);
+near('iv round trip with dividends', C.impliedVol('put', pq, 100, 95, 0.5, 0.04, 0.03), 0.3, 1e-4);
+// Each Greek matches a small "nudge" calculation
+['call', 'put'].forEach(function (ty) {
+  const S = 404.75, K = 370, T = 38 / 365, r = 0.04, v = 0.35, dq = 0.0229, h = 0.01;
+  const g = C.bs(ty, S, K, T, r, v, dq);
+  near(ty + ' delta = price slope', g.delta, (C.bs(ty, S + h, K, T, r, v, dq).price - C.bs(ty, S - h, K, T, r, v, dq).price) / (2 * h), 1e-4);
+  near(ty + ' gamma = delta slope', g.gamma, (C.bs(ty, S + h, K, T, r, v, dq).delta - C.bs(ty, S - h, K, T, r, v, dq).delta) / (2 * h), 1e-5);
+  near(ty + ' vega = price change per vol point', g.vega, (C.bs(ty, S, K, T, r, v + 0.0001, dq).price - C.bs(ty, S, K, T, r, v - 0.0001, dq).price) / 0.0002 / 100, 1e-5);
+  const d = 1e-4 / 365;
+  near(ty + ' theta = price change per day', g.theta, (C.bs(ty, S, K, T - d, r, v, dq).price - C.bs(ty, S, K, T + d, r, v, dq).price) / (2 * d) / 365, 1e-4);
+});
+// Robert's UNH spread against thinkorswim (Nov 10, 2026): S 404.75, 38 days, dividend yield 2.29%
+let tos370 = C.bs('put', 404.75, 370, 38 / 365, 0.04, 0.3514, 0.0229);
+let tos360 = C.bs('put', 404.75, 360, 38 / 365, 0.04, 0.3605, 0.0229);
+near('370 put Prob ITM vs TOS 22.57%', tos370.probItm, 0.2257, 0.005);
+near('360 put Prob ITM vs TOS 16.67%', tos360.probItm, 0.1667, 0.005);
+near('370 put delta vs TOS -0.193', tos370.delta, -0.19287, 0.005);
+near('360 put delta vs TOS -0.139', tos360.delta, -0.13906, 0.005);
+near('370 put theta vs TOS -0.162/day', tos370.theta, -0.16192, 0.016);
+near('360 put theta vs TOS -0.135/day', tos360.theta, -0.13452, 0.014);
+near('370 put vega vs TOS 0.357', tos370.vega, 0.35663, 0.018);
+near('360 put vega vs TOS 0.289', tos360.vega, 0.28871, 0.015);
+const unh = { id: 'u', ticker: 'UNH', strategy: 'pcs', qty: 1, stockPrice: '404.75', divYield: '2.29',
+  legs: [{ side: 'sell', type: 'put', strike: '370', expiry: '2026-12-18', fill: '5.82', mark: '5.15' },
+         { side: 'buy', type: 'put', strike: '360', expiry: '2026-12-18', fill: '3.97', mark: '3.50' }] };
+a = C.analyzePosition(unh, cfg, null, N2);
+near('UNH position delta vs TOS 5.38', a.posDelta, 5.381, 0.4);
+near('UNH theta/day vs TOS +2.74', a.theta, 2.74, 0.4);
+near('UNH vega vs TOS -6.79', a.vega, -6.792, 0.8);
+near('UNH gamma vs TOS -0.127', a.posGamma, -0.127, 0.02);
+near('UNH P/L vs TOS +$20', a.pl, 20, 1e-6);
+near('UNH max loss vs TOS BP $815', a.maxLoss, 815, 1e-6);
+is('dividend yield used', a.dq === 0.0229 && a.dqSrc === 'typed', true);
+// dividend from the automatic info file: yearly $ / price
+const pr2 = { stocks_updated: '2026-11-10T20:30:00Z', stocks: { UNH: { price: 404.75 } }, info: { UNH: { divRate: 9.27 } }, chains: {} };
+a = C.analyzePosition(Object.assign({}, unh, { divYield: '' }), cfg, pr2, N2);
+near('dividend yield from info file', a.dq, 9.27 / 404.75, 1e-9);
+// account totals
+const sm2 = C.summarize([C.analyzePosition(unh, cfg, null, N2)], { value: 35000, cash: 25000 }, cfg);
+near('account theta = trade theta', sm2.theta, C.analyzePosition(unh, cfg, null, N2).theta, 1e-9);
+is('gamma per 1% is negative for a short put spread', sm2.gamma1pct < 0, true);
+
 console.log(passes + ' passed, ' + fails + ' failed');
 process.exit(fails ? 1 : 0);

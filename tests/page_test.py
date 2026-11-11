@@ -49,6 +49,10 @@ try:
         page.wait_for_timeout(200)
         check("details row opens", page.locator(".detail-row").count() >= 1)
         check("account risk profile drawn", page.locator("#exposure .rplot path.sline").count() == 1)
+        check("8 account tiles incl. theta, vega, gamma", page.locator("#exposure .tile").count() == 8)
+        check("theta column in trade list", page.locator(".ptable thead th", has_text="Theta/day").count() == 1)
+        check("details show Prob ITM", page.locator(".detail-row .legtable th", has_text="Prob ITM").count() == 1)
+        check("details show theta, gamma, vega", all(page.locator(".detail-row .kv dt", has_text=t).count() >= 1 for t in ["Theta per day", "Gamma", "Vega", "Dividend yield"]))
         check("trade risk profile has today + expiration lines", page.locator(".detail-row .rplot path.sline").count() == 2)
         box = page.locator(".detail-row .rplot").first.bounding_box()
         page.mouse.move(box["x"] + box["width"] * 0.3, box["y"] + box["height"] * 0.5)
@@ -71,6 +75,8 @@ try:
         page.fill("#f-strike-1", "47")  # wrong: long above short
         page.fill("#f-fill-0", "1.00")
         page.fill("#f-fill-1", "0.40")
+        page.click(".more summary")
+        page.fill("#f-divy", "2.5")
         page.click("#dlgSave")
         page.wait_for_timeout(200)
         check("wrong strike order shows an error", page.locator("#formErrors:not([hidden]) li").count() >= 1)
@@ -79,6 +85,7 @@ try:
         page.click("#dlgSave")
         page.wait_for_timeout(200)
         check("trade added", page.locator(".ptable > tbody > tr:not(.detail-row)").count() == 8)
+        check("dividend yield saved with the trade", page.evaluate("JSON.parse(localStorage.getItem('options-risk-check.v1')).positions.some(p => p.divYield === '2.5')"))
         check("missing current price is flagged", page.get_by_text("Enter the current price of the 45 put").count() >= 1)
 
         # Edit it: add current prices

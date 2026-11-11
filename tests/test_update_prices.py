@@ -1,5 +1,6 @@
 """Runs the price job against a stand-in for Yahoo, so every part can be checked without the internet."""
 import collections
+import math
 import json
 import os
 import shutil
@@ -40,7 +41,7 @@ def fake_chain_df(S, kind, T):
     import update_prices as up
     rows = []
     for K in [round(S * f, 1) for f in (0.5, 0.7, 0.8, 0.9, 0.95, 1.0, 1.05, 1.1, 1.3, 1.6)]:
-        p = up.bs_price(kind, S, K, T, up.RATE, 0.30)
+        p = up.bs_price(kind, S, K, T, up.RATE, 0.30, 2.5 / S)
         rows.append({"contractSymbol": "X", "strike": K, "lastPrice": round(p, 2), "bid": round(max(p - 0.05, 0), 2),
                      "ask": round(p + 0.05, 2), "impliedVolatility": 0.31, "volume": 10, "openInterest": 100})
     return pd.DataFrame(rows)
@@ -93,7 +94,7 @@ class FakeTicker:
     @property
     def info(self):
         self._guard()
-        return {"beta": 1.234}
+        return {"beta": 1.234, "dividendRate": 2.5}
 
 
 def fake_download(chunk, **kw):
@@ -135,6 +136,8 @@ up.urllib.request.urlopen = lambda *a, **k: (_ for _ in ()).throw(OSError("offli
 check("put price matches page", abs(up.bs_price("P", 100, 100, 1, 0.05, 0.2) - 5.5735) < 1e-3)
 check("call price matches page", abs(up.bs_price("C", 100, 100, 1, 0.05, 0.2) - 10.4506) < 1e-3)
 check("implied vol round trip", abs(up.implied_vol("P", up.bs_price("P", 50, 45, 0.1, 0.04, 0.37), 50, 45, 0.1, 0.04) - 0.37) < 1e-4)
+check("implied vol round trip with dividend", abs(up.implied_vol("P", up.bs_price("P", 50, 45, 0.1, 0.04, 0.37, 0.03), 50, 45, 0.1, 0.04, 0.03) - 0.37) < 1e-4)
+check("parity with dividend", abs(up.bs_price("C", 100, 95, 0.5, 0.04, 0.3, 0.03) - up.bs_price("P", 100, 95, 0.5, 0.04, 0.3, 0.03) - (100 * math.exp(-0.015) - 95 * math.exp(-0.02))) < 1e-9)
 
 # ------------------------------------------------------------ choosing expirations
 spy = FakeTicker("SPY").options
@@ -172,6 +175,7 @@ try:
     check("earnings is the next future date", rec["earnings"] == (TODAY + timedelta(days=20)).isoformat())
     check("ex-dividend saved", rec["exdiv"] == (TODAY + timedelta(days=5)).isoformat())
     check("beta saved", rec["beta"] == 1.23)
+    check("yearly dividend saved", rec["divRate"] == 2.5)
     check("sector from S&P list", rec["sector"] == "Health Care")
 
     # ------------------------------------------------------------ chains
